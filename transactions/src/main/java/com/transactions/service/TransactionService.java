@@ -2,6 +2,7 @@ package com.transactions.service;
 
 import com.transactions.model.*;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 
@@ -9,6 +10,8 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 import java.util.stream.Collectors;
 
 @Service
@@ -22,36 +25,33 @@ public class TransactionService {
 
     @Autowired
     private PendingTransactionService pendingTransactionService;
-    public ResponseEntity<Map<String, List<Transaction>>> getTransaction01(String accountNumber, String status) {
-        switch (status) {
-            case "ALL" -> {
-                List<Success> successTransactions = successTransactionService.getSuccessTransaction(accountNumber).getSuccess();
-                List<Failure> failureTransactions = failureTransactionService.getFailureTransaction(accountNumber).getFailure();
-                List<Pending> pendingTransactions = pendingTransactionService.getPendingTransaction(accountNumber).getPending();
-                Map<String, List<Transaction>> response = new HashMap<>();
-                response.put("success", mapToTransactionList(successTransactions));
-                response.put("failure", mapToTransactionList(failureTransactions));
-                response.put("pending", mapToTransactionList(pendingTransactions));
-                return ResponseEntity.ok(response);
-            }
-            case "success" -> {
-                List<Success> successOnly = successTransactionService.getSuccessTransaction(accountNumber).getSuccess();
-                return ResponseEntity.ok(Collections.singletonMap("success", mapToTransactionList(successOnly)));
-            }
-            case "failure" -> {
-                List<Failure> failureOnly = failureTransactionService.getFailureTransaction(accountNumber).getFailure();
-                return ResponseEntity.ok(Collections.singletonMap("failure", mapToTransactionList(failureOnly)));
-            }
-            case "pending" -> {
-                List<Pending> pendingOnly = pendingTransactionService.getPendingTransaction(accountNumber).getPending();
-                return ResponseEntity.ok(Collections.singletonMap("pending", mapToTransactionList(pendingOnly)));
-            }
-            default -> {
-                return ResponseEntity.badRequest().body(Collections.emptyMap());
-            }
+
+    public ResponseEntity<Map<String, List<Transaction>>> getTransactionConcurrent(String accountNumber, String status) {
+        CompletableFuture<List<Transaction>> successFuture = CompletableFuture.supplyAsync(() ->
+                mapToTransactionList(successTransactionService.getSuccessTransaction(accountNumber).getSuccess()));
+
+        CompletableFuture<List<Transaction>> failureFuture = CompletableFuture.supplyAsync(() ->
+                mapToTransactionList(failureTransactionService.getFailureTransaction(accountNumber).getFailure()));
+
+        CompletableFuture<List<Transaction>> pendingFuture = CompletableFuture.supplyAsync(() ->
+                mapToTransactionList(pendingTransactionService.getPendingTransaction(accountNumber).getPending()));
+
+        try {
+            List<Transaction> successTransactions = successFuture.get();
+            List<Transaction> failureTransactions = failureFuture.get();
+            List<Transaction> pendingTransactions = pendingFuture.get();
+
+            Map<String, List<Transaction>> response = new HashMap<>();
+            response.put("success", successTransactions);
+            response.put("failure", failureTransactions);
+            response.put("pending", pendingTransactions);
+
+            return ResponseEntity.ok(response);
+        } catch (InterruptedException | ExecutionException e) {
+            // Handle exceptions appropriately
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Collections.emptyMap());
         }
     }
-
     private List<Transaction> mapToTransactionList(List<? extends Transaction> transactions) {
         return transactions.stream()
                 .map(transaction -> new TransactionDto(

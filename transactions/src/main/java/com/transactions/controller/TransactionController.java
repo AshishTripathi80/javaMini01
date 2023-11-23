@@ -30,8 +30,9 @@ public class TransactionController {
 
     @GetMapping("/transactions/{accountNumber}")
     public ResponseEntity<Map<String, List<Transaction>>> getTransactions(@PathVariable String accountNumber, @RequestParam(required = false) String status) {
+
         LOGGER.info("Received request for accountNumber: {} with status: {}", accountNumber, status);
 
-        return transactionService.getTransaction01(accountNumber, status);
+        return transactionService.getTransactionConcurrent(accountNumber, status);
     }
 }
